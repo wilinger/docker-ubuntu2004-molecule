@@ -4,15 +4,6 @@ ARG DEBIAN_FRONTEND=noninteractive
 
 ENV pip_packages "ansible"
 
-# Don't start any optional services except for the few we need.
-RUN find /etc/systemd/system \
-    /lib/systemd/system \
-    -path '*.wants/*' \
-    -not -name '*journald*' \
-    -not -name '*systemd-tmpfiles*' \
-    -not -name '*systemd-user-sessions*' \
-    -exec rm \{} \;
-
 # Install dependencies.
 RUN apt-get update \
     && apt-get install -y --no-install-recommends \
@@ -37,10 +28,19 @@ RUN sed -i 's/^\($ModLoad imklog\)/#\1/' /etc/rsyslog.conf
 # Fix potential UTF-8 errors with ansible-test.
 RUN locale-gen en_US.UTF-8
 
-RUN systemctl set-default multi-user.target
-
 # Install Ansible via Pip.
 RUN pip3 install $pip_packages
+
+COPY initctl_faker .
+RUN chmod +x initctl_faker && rm -rf /sbin/initctl && ln -s /initctl_faker /sbin/initctl
+
+COPY systemctl3.py /usr/bin/systemctl
+COPY systemctl3.py /bin/systemctl
+RUN chmod +x /usr/bin/systemctl && chmod +x /bin/systemctl
+
+# Install Ansible inventory file.
+RUN mkdir -p /etc/ansible
+RUN echo "[local]\nlocalhost ansible_connection=local" > /etc/ansible/hosts
 
 # Remove unnecessary getty and udev targets that result in high CPU usage when using
 # multiple containers with Molecule (https://github.com/ansible/molecule/issues/1104)
@@ -48,6 +48,4 @@ RUN rm -f /lib/systemd/system/systemd*udev* \
   && rm -f /lib/systemd/system/getty.target
 
 VOLUME ["/sys/fs/cgroup", "/tmp", "/run"]
-STOPSIGNAL SIGRTMIN+3
-# Workaround for docker/docker#27202, technique based on comments from docker/docker#9212
-CMD ["/bin/bash", "-c", "exec /sbin/init --log-target=journal 3>&1"]
+CMD ["/lib/systemd/systemd"]
